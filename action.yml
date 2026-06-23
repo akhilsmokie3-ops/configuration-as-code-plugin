@@ -1,0 +1,63 @@
+name: Deploy to AWS EC2
+description: Deploys the application to AWS EC2 instances
+author: akhilsmokie3-ops
+
+inputs:
+  aws-access-key-id:
+    required: true
+    description: AWS Access Key ID
+  aws-secret-access-key:
+    required: true
+    description: AWS Secret Access Key
+  ec2-instance-id:
+    required: true
+    description: EC2 Instance ID to deploy to
+  region:
+    required: false
+    default: us-east-1
+    description: AWS Region (default us-east-1)
+  deployment-script:
+    required: true
+    description: Path to the deployment script
+
+outputs:
+  deployment-status:
+    description: Status of the deployment
+  instance-ip:
+    description: IP Address of the EC2 instance
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS Credentials
+      shell: bash
+      run: |
+        aws configure set aws_access_key_id "${{ inputs.aws-access-key-id }}"
+        aws configure set aws_secret_access_key "${{ inputs.aws-secret-access-key }}"
+        aws configure set default.region "${{ inputs.region }}"
+
+    - name: Get EC2 Instance IP
+      id: get-ip
+      shell: bash
+      run: |
+        INSTANCE_IP=$(aws ec2 describe-instances \
+          --instance-ids "${{ inputs.ec2-instance-id }}" \
+          --region "${{ inputs.region }}" \
+          --query "Reservations[0].Instances[0].PublicIpAddress" \
+          --output text)
+        echo "instance-ip=${INSTANCE_IP}" >> "$GITHUB_OUTPUT"
+        echo "EC2 Instance IP: ${INSTANCE_IP}"
+
+    - name: Run Deployment Script
+      shell: bash
+      run: |
+        echo "Starting deployment to EC2 instance ${{ inputs.ec2-instance-id }}"
+        echo "Region: ${{ inputs.region }}"
+        chmod +x "${{ inputs.deployment-script }}"
+        "${{ inputs.deployment-script }}"
+
+    - name: Set Deployment Status
+      shell: bash
+      run: |
+        echo "deployment-status=success" >> "$GITHUB_OUTPUT"
+        echo "Deployment complete"

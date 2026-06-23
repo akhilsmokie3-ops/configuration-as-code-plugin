@@ -1,0 +1,88 @@
+version: 2.1
+
+# Deploy to AWS EC2 - CircleCI equivalent of the GitHub Actions composite action.
+# Required environment variables (set in CircleCI project settings or contexts):
+#   AWS_ACCESS_KEY_ID       - AWS Access Key ID
+#   AWS_SECRET_ACCESS_KEY   - AWS Secret Access Key
+#   EC2_INSTANCE_ID         - Target EC2 Instance ID
+#   AWS_REGION              - AWS Region (default: us-east-1)
+#   DEPLOYMENT_SCRIPT       - Path to the deployment script inside the repo
+
+commands:
+  deploy-to-ec2:
+    description: Deploy the application to an AWS EC2 instance
+    parameters:
+      aws-access-key-id:
+        type: env_var_name
+        default: AWS_ACCESS_KEY_ID
+        description: Name of the env var holding the AWS Access Key ID
+      aws-secret-access-key:
+        type: env_var_name
+        default: AWS_SECRET_ACCESS_KEY
+        description: Name of the env var holding the AWS Secret Access Key
+      ec2-instance-id:
+        type: env_var_name
+        default: EC2_INSTANCE_ID
+        description: Name of the env var holding the EC2 Instance ID
+      region:
+        type: string
+        default: us-east-1
+        description: AWS Region
+      deployment-script:
+        type: string
+        description: Path to the deployment script relative to the repo root
+    steps:
+      - run:
+          name: Configure AWS CLI
+          command: |
+            aws configure set aws_access_key_id      "${<< parameters.aws-access-key-id >>}"
+            aws configure set aws_secret_access_key  "${<< parameters.aws-secret-access-key >>}"
+            aws configure set default.region         "<< parameters.region >>"
+
+      - run:
+          name: Get EC2 Instance IP
+          command: |
+            INSTANCE_IP=$(aws ec2 describe-instances \
+              --instance-ids "${<< parameters.ec2-instance-id >>}" \
+              --region "<< parameters.region >>" \
+              --query "Reservations[0].Instances[0].PublicIpAddress" \
+              --output text)
+            echo "EC2 Instance IP: ${INSTANCE_IP}"
+            echo "export INSTANCE_IP=${INSTANCE_IP}" >> "$BASH_ENV"
+
+      - run:
+          name: Run Deployment Script
+          command: |
+            echo "Starting deployment to EC2 instance ${<< parameters.ec2-instance-id >>}"
+            echo "Region: << parameters.region >>"
+            chmod +x "<< parameters.deployment-script >>"
+            "<< parameters.deployment-script >>"
+
+      - run:
+          name: Report Deployment Status
+          command: |
+            echo "Deployment complete. Instance IP: ${INSTANCE_IP}"
+
+jobs:
+  deploy:
+    docker:
+      - image: cimg/aws:2024.03
+    environment:
+      AWS_REGION: us-east-1
+    steps:
+      - checkout
+      - deploy-to-ec2:
+          region: us-east-1
+          deployment-script: ${DEPLOYMENT_SCRIPT:-./deploy.sh}
+
+workflows:
+  deploy-workflow:
+    jobs:
+      - deploy:
+          context:
+            - aws-ec2-deploy
+          filters:
+            branches:
+              only:
+                - master
+                - main
